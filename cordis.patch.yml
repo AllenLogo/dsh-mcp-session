@@ -1,0 +1,20 @@
+# dsh-mcp-session — host-half mount row.
+#
+# All behaviour is configured through `$DSH_HOME/mcp-session.json` (hot
+# reloaded by mtime); the row config below is the highest-precedence override.
+#
+#   defaultPolicy:   lazy (default) hides every mcp__* tool; eager hides nothing
+#   keywordReveal:   reveal a server for the current turn when its hints appear
+#   proxyTool:       register mcp_call / mcp_pin / mcp_unpin / mcp_pins /
+#                    mcp_status in each agent's own layer; false RELEASES all
+#                    five (deny + keyword reveal + catalog still work). The
+#                    config file is watched, so a flip re-applies to every live
+#                    agent without waiting for a dispatch.
+#   catalog:         inject the compact server catalog into the system prompt
+#   hintScan:        { maxServers: 3 }
+#   servers:         { "<server>": { label, hints: [...] } }
+#   pins:            { default: [...], byWorkspace: {} }
+- insert:
+    - id: dsh-mcp-session
+      name: dsh-mcp-session
+      config: {}

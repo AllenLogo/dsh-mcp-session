@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# logs / editor
+*.log
+.DS_Store
+
+# typescript incremental state
+*.tsbuildinfo
+
+# Internal process artifacts — NOT part of the published package.
+# `verification/` is the verifier's V1–V8 matrix, `review/` the reviewer's
+# findings; both stay in the delivery workspace so an accidental `git add -A`
+# cannot leak internal evidence into the public repo.
+verification/
+review/
+
+# NOTE: `lib/*.js.map` is deliberately NOT ignored here (the sibling plugins do
+# ignore it). `canonical` covers src+lib **including** the source maps, so the
+# published tree could not reproduce the certified digest if the maps were
+# dropped. Publishing them keeps the repo byte-for-byte equal to the certified
+# artifact — see docs/release-report.md.

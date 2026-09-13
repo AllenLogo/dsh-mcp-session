@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "outDir": "lib",
+    "rootDir": "src",
+    "declaration": true,
+    "declarationDir": "lib/types",
+    "sourceMap": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": false,
+    "types": ["node"]
+  },
+  "include": ["src/index.ts", "src/manager.ts", "src/tools.ts", "src/registry.ts", "src/hints.ts", "src/config.ts", "src/types.ts"],
+  "exclude": ["node_modules", "lib", "harness"]
+}

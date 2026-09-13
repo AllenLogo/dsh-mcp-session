@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Build
+        run: pnpm run build
+      # The committed `lib/` must be exactly what this repository's tsconfig
+      # produces from `src/` — a stale artifact (src newer than lib) fails here
+      # instead of silently changing the plugin's identity.
+      - name: Committed lib/ is not stale (build output == committed files)
+        run: git diff --exit-code -- lib
+      # Print the identity of the tree this workflow just certified. The value
+      # must equal the digest recorded in docs/release-report.md; anyone can
+      # recompute it locally with the command in README.md ("Reproducing the
+      # artifact identity").
+      - name: Artifact identity (canonical over src+lib)
+        run: |
+          echo "canonical: $(find src lib -type f | sort | xargs sha256sum | sha256sum)"
+          echo "lib/*.js  fingerprint: $(find lib -name '*.js' | sort | xargs sha256sum | sha256sum)"
