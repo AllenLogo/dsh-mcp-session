@@ -144,13 +144,18 @@ NUL 安全等价写法(同值):
 应得到 `8921646477ff2a68458f966a158ccc1a66d07956d64cbaf31e91a48b6f7109e0`。
 
 **发布树身份(全量清单 + 摘要,与 §1 的构件身份并列——后者只覆盖 `src`+`lib`,前者覆盖整个发布内容)**:
-本次发布 **48 文件 / 400,151 字节**;对发布清单取「排序后逐文件 sha256、再把清单文本 sha256」得到
+对发布清单取「排序后逐文件 sha256、再把清单文本 sha256」。本仓库有**两次提交**,各有一对数字:
 
-```
-831ea26718ec1dc7b512a4cfbbec030315e06fec918aae68350ea4b30453512e
-```
+| 提交 | 内容 | 全量 | `releaseTreeDigest`(不含本文件) |
+|---|---|---|---|
+| **第一次** `192fb431da663adbae89c359b9ce2654a3f299b0`(root) | 首次发布;`harness/mutate-and-check.sh` = 18:34 版 | 48 文件 / **402,387** 字节 | **`831ea26718ec1dc7b512a4cfbbec030315e06fec918aae68350ea4b30453512e`**(47 文件) |
+| **第二次**(本提交,HEAD) | 落地 harness 收敛补丁(`harness/mutate-and-check.sh` + `harness/README.md`)并修正本文数字 | 48 文件 | **`70a2224b0870b46e142389830a89a238fd973763dc5fe929fbd8871d2ac277e0`**(47 文件 / **392,802** 字节) |
 
-该值**刻意不覆盖本文件自身**(`docs/release-report.md`),覆盖范围 = 发布清单里除本文件外的 **47 个文件**;
+> **为什么第二次不写"全量字节数"**:全量含本文件自身,而本文每次编辑都会改变它 ⇒ 该数字**不可自洽地稳定书写**
+> (写进去就变)。故第二次只给**可稳定复算**的口径:47 文件子集(392,802 字节)+ 上面的摘要值。
+> 历史勘误:第一次提交时本文曾写"48 文件 / 400,151 字节",那是更早的测量值,实际为 **402,387** 字节。
+
+该摘要值**刻意不覆盖本文件自身**(`docs/release-report.md`),覆盖范围 = 发布清单里除本文件外的 **47 个文件**;
 因此在本文中写入它不会改变它,任何人可稳定复算,用于核对"仓库内容是否被后续改动"。复算方式(仓库根、原样执行):
 
 ```sh
@@ -163,11 +168,13 @@ find . -type f -not -path './node_modules/*' -not -path './review/*' -not -path 
 > 是**发布内容身份**(覆盖 README/package.json/docs/CI 等)。两者互补,缺一不可 —— 只锚前者时,
 > 文档或包元数据被改将无人可查。
 
-**已知的后续提交(如实记录,避免误读本发布树)**:本发布树中的 `harness/mutate-and-check.sh` 仍是
-18:34 版;一项**已预验证但尚未落地**的 harness 收敛补丁 —— self-proof 文件名按分支区分(收口 gate 3b)、
-`$MS_MUT_DIR/delivered-tree.json`(L5 机器可读记录)、README 的计数与命名文案同步 —— 将在**推送后的
-后续提交**中落地,届时在该提交里再次记录 `commit`/`tree` SHA 与新的一对摘要。该补丁只改
-`harness/**`,**不改变 `src`+`lib` 的 canonical**。
+**harness 收敛补丁:已在第二次提交落地(如实记录)**:第一次提交里的 `harness/mutate-and-check.sh` 是 18:34 版;
+其收敛补丁 —— self-proof 文件名按分支区分(`<label>.<branch>.selfproof.json`,收口评审预登记闸门 `gate 3b`)、
+`$MS_MUT_DIR/delivered-tree.json`(L5 机器可读记录)、README 的 INCONCLUSIVE 六类枚举与命名文案同步、旧命名引用清零 ——
+已在**第二次提交**落地,落地后两文件逐字节等于被审 artifact:
+`harness/mutate-and-check.sh` = `3265045d46b2842ba7865747744fca708cba44465161426c508f94bc7bd97bc8`(20,058 B)、
+`harness/README.md` = `6a7daf4a91c410ee4ebc6c847f63d215ea72d629e0100d6e54bd21bbf09b89e0`(25,916 B)。
+该补丁只改 `harness/**`,**`src`+`lib` 的 canonical 全程不变**(仍为 `89216464…`)。
 
 **推送方式**:本机 `github.com:443` 不可达,故走 `api.github.com` 的 Git Data API
 (`blob → tree → commit → ref`),与 `dsh-restart-button` / `dsh-software-tools` 相同的账号与通道;

@@ -14,7 +14,7 @@
 #             reading is NEVER reported as "NOT CAUGHT": a premature verdict must
 #             not be blamed on the assertion.
 #
-# Every mutation writes $MS_MUT_DIR/<label>.selfproof.json — including the
+# Every mutation writes $MS_MUT_DIR/<label>.<branch>.selfproof.json — including the
 # INCONCLUSIVE branches — carrying the sampled digests, the branch it took and
 # the run_harness start/end timestamps, so "was the contamination inside the
 # run?" is answerable from the artefact instead of from a guess.
@@ -130,7 +130,10 @@ run_harness() {
 #   $6 libAfterRestore  $7 branch  $8 reason
 # globals: LIB_BASELINE, RUN_STARTED_AT, RUN_FINISHED_AT
 selfproof_path() {
-  echo "$MUT_DIR/$(echo "$1" | tr -cd 'A-Za-z0-9_-').selfproof.json"
+  # One file per (label, branch): two INCONCLUSIVE runs of one label in the same
+  # MS_MUT_DIR must not overwrite each other's evidence (reviewer gate 3b). The
+  # gates resolve the file by its `branch` FIELD; the name is only an index.
+  echo "$MUT_DIR/$(echo "$1" | tr -cd 'A-Za-z0-9_-').$(echo "${2:-unknown}" | tr -cd 'A-Za-z0-9_-').selfproof.json"
 }
 
 write_selfproof() {
@@ -138,7 +141,7 @@ write_selfproof() {
     const fs = require("fs")
     const [out, payload] = process.argv.slice(1)
     fs.writeFileSync(out, JSON.stringify(JSON.parse(payload), null, 2))
-  ' "$(selfproof_path "$1")" "$(node -e '
+  ' "$(selfproof_path "$1" "${7:-}")" "$(node -e '
     console.log(JSON.stringify({
       label: process.argv[1], file: process.argv[2], expect: process.argv[3],
       branch: process.argv[4], reason: process.argv[5],
@@ -383,6 +386,22 @@ if [[ "$DELIVERED_AFTER" != "$DELIVERED_BEFORE" ]]; then
 else
   echo "  delivered tree unchanged ⇒ every mutation stayed inside the working copy."
 fi
+
+# L5 (machine-readable): one record for the whole run. The "after" value only
+# exists once every mutation has finished, so it is written here instead of being
+# stamped into each self-proof; the stdout lines above stay as they were.
+node -e '
+  const fs = require("fs")
+  const [out, before, after] = process.argv.slice(1)
+  fs.writeFileSync(out, JSON.stringify({
+    deliveredTreeCanonicalBefore: before,
+    deliveredTreeCanonicalAfter: after,
+    deliveredTreeUnchanged: before === after && after !== "",
+    cwd: "plugins/dsh-mcp-session",
+    command: "find src lib -type f | sort | xargs sha256sum | sha256sum",
+    generatedAt: new Date().toISOString(),
+  }, null, 2))
+' "$MUT_DIR/delivered-tree.json" "$DELIVERED_BEFORE" "$DELIVERED_AFTER"
 
 if [[ "$overall" == "0" ]]; then
   echo

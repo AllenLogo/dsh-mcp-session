@@ -279,7 +279,7 @@ lib digest unchanged ⇒ every mutation was byte-for-byte reverted.
 
 A verdict of `NOT CAUGHT` (the assertion cannot fail) or `UNEXPECTED COLLATERAL`
 (failures outside the mutated behaviour) fails the script. **`INCONCLUSIVE` has
-four distinct causes and they are not interchangeable** — every one of them is
+six distinct causes and they are not interchangeable** — every one of them is
 logged *and* written into that mutation's self-proof JSON with its `branch`:
 
 | Branch | Meaning | What to do |
@@ -291,13 +291,25 @@ logged *and* written into that mutation's self-proof JSON with its `branch`:
 | `inconclusive-restore-drift` | `lib` did not return to the baseline after restoring | the build is not deterministic, or something else wrote `lib` |
 | `inconclusive-truncated` | the run produced fewer steps than the baseline (shared-host contention) | rerun — this is the only "just rerun" case |
 
+Each mutation writes `$MS_MUT_DIR/<label>.<branch>.selfproof.json` — one file per
+**branch**, so two different INCONCLUSIVE verdicts for the same label in one
+`MS_MUT_DIR` coexist instead of overwriting each other. Every self-proof of a run
+also carries `deliveredTreeCanonicalBefore` / `deliveredTreeCanonicalAfter` /
+`deliveredTreeUnchanged` (the SRC_DIR canonical, stamped once the run is over).
+
+Mapping to the four failure names used in review prose:
+`pristine-at-sample` + `changed-after-apply` + `not-landed` all mean *the patch did
+not survive the sample gap*; `contaminated-in-window` means *the run was
+contaminated*; `restore-drift` means *the build did not restore*; `truncated`
+means *the run was short (shared-host contention)*.
+
 The two contamination branches are the ones that would otherwise be *misreported
 as `NOT CAUGHT`* and blamed on the assertion: `expected` is therefore the digest
 of the bytes the patch step **wrote** (never a second read of the file), and a
 rewrite inside the run is caught by the post-run sample.
 
-Every mutation writes `$MS_MUT_DIR/<label>.selfproof.json` on **every** branch
-(caught / not-caught / collateral / all four INCONCLUSIVE branches), with
+Every mutation writes `$MS_MUT_DIR/<label>.<branch>.selfproof.json` on **every** branch
+(caught / not-caught / collateral / all six INCONCLUSIVE branches), with
 `{label, file, expect, branch, reason, libBaseline, mutatedFileAfterApply,
 mutatedFileAfterRun, libAfterRestore, runStartedAt, runFinishedAt,
 runStartedEpochMs, runFinishedEpochMs, generatedAt}` — so "was the contamination
