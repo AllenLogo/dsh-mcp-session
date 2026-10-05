@@ -25,7 +25,7 @@ import type { McpSessionUserConfig } from './config.js'
 /** Plugin name (must match the cordis insert row `name`). */
 export const name = 'dsh-mcp-session'
 /** Services this plugin needs before `apply` runs. */
-export const inject = ['tools', 'systemPrompt', 'agents']
+export const inject = ['tools', 'systemPrompt', 'agents', 'llm']
 
 export type { McpSessionUserConfig, ResolvedConfig, ServerHintConfig } from './config.js'
 

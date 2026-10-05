@@ -158,6 +158,10 @@ export class SessionManager {
   private applying = false
   private rescanQueued = false
   private failOpen = false
+  /** `provider/model` → whether that resolved route accepts deferred definitions. */
+  private readonly deferral = new Map<string, boolean>()
+  /** Routes whose capability lookup is already in flight. */
+  private readonly deferralPending = new Set<string>()
 
   constructor(
     private readonly ctx: Context,
@@ -443,6 +447,7 @@ export class SessionManager {
       helperFailures: [],
       helperFailOpen: false,
       pinnedMissing: [],
+      deferring: false,
     }
     if (depth === 0) {
       for (const server of this.sessionDefaultPins(agent)) state.pinned.add(server)
@@ -498,6 +503,57 @@ export class SessionManager {
    * MCP name set moved, and a shadow is re-registered only when its definition
    * object changed (server reconnect).
    */
+  /** The resolved model route of one agent's session, when known. */
+  private routeOf(state: SessionState): { provider: string; model: string } | undefined {
+    try {
+      const context = state.agent.session?.requestContext()
+      if (context === undefined) return undefined
+      return { provider: context.provider, model: context.model }
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Whether this agent's resolved route accepts deferred tool definitions.
+   *
+   * `ToolSchema.deferLoading` is provider-facing: the DeepSeek adapter
+   * serializes it to `defer_loading` and sends the mid-conversation
+   * tool-changes beta header, while a route that declares no `ToolUpdate`
+   * either has the marker stripped (`dsh-llm`) or refuses the request outright
+   * (`dsh-llm-pi-ai` throws "Deferred tool loading is not supported yet").
+   * So the marker is only ever inscribed for a route whose resolved metadata
+   * declares `toolUpdate`.
+   *
+   * The lookup is asynchronous and cached per `provider/model`; until it
+   * settles this returns false (conservative: the marker is never sent to a
+   * route that might reject it). A positive answer re-applies visibility so
+   * the shadows are rebuilt carrying the marker.
+   */
+  private deferralSupported(state: SessionState): boolean {
+    const route = this.routeOf(state)
+    if (route === undefined) return false
+    const key = `${route.provider}/${route.model}`
+    const known = this.deferral.get(key)
+    if (known !== undefined) return known
+    if (!this.deferralPending.has(key)) {
+      this.deferralPending.add(key)
+      this.ctx.llm
+        .resolveModelInfo(route.provider, route.model)
+        .then((info) => {
+          const supported = info.toolUpdate !== undefined
+          this.deferral.set(key, supported)
+          if (supported) this.applyAll()
+        })
+        .catch((error: unknown) => {
+          this.deferral.set(key, false)
+          this.logError('llm.resolveModelInfo', error)
+        })
+        .finally(() => this.deferralPending.delete(key))
+    }
+    return false
+  }
+
   private applyVisibility(state: SessionState): void {
     const config = this.config
     this.applying = true
@@ -522,6 +578,14 @@ export class SessionManager {
         return
       }
       const desired = this.effectiveServers(state)
+
+      // The deferred marker is part of the registered object, so a flip of the
+      // route's capability must rebuild this agent's shadows from scratch.
+      const deferring = this.deferralSupported(state)
+      if (state.deferring !== deferring) {
+        this.disposeShadows(state)
+        state.deferring = deferring
+      }
 
       const allNames = this.registry.allNames()
       const denyCurrent =
@@ -564,7 +628,16 @@ export class SessionManager {
               /* a stale lift is already gone */
             }
           }
-          shadow.lifts.set(tool, state.agent.ctx.tools.register(definition))
+          // `deferLoading` asks the provider to keep this definition out of
+          // model context until it is actually needed (Anthropic's
+          // `defer_loading` terminology); `defs` keeps the REGISTRY definition
+          // so reconnect detection stays independent of the decoration.
+          shadow.lifts.set(
+            tool,
+            state.agent.ctx.tools.register(
+              state.deferring ? { ...definition, deferLoading: true } : definition,
+            ),
+          )
           shadow.defs.set(tool, definition)
         }
         for (const [tool, lift] of [...shadow.lifts]) {
