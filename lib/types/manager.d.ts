@@ -72,6 +72,13 @@ export declare class SessionManager {
      * MCP name set moved, and a shadow is re-registered only when its definition
      * object changed (server reconnect).
      */
+    /**
+     * Human-readable deferral state for one agent: whether this agent's shadows
+     * carry the deferred marker, plus the route that decided it.
+     */
+    private deferralNote;
+    /** Aggregate deferral state across live agents (for the status header). */
+    private deferralSummary;
     /** The resolved model route of one agent's session, when known. */
     private routeOf;
     /**
