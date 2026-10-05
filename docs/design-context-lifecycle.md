@@ -5,6 +5,25 @@
 >
 > 本文的事实基础全部来自本机实测(DSH 0.2.0-rc.2),不依赖推测。
 
+
+> ## ⚠️ v3 修订(优先读这一节)
+>
+> 复核官方协议后发现:**DSH 早已实现"用到才加载"的工具协议,只是 MCP 桥没用它。**
+> 这改变了方案的杠杆顺序 —— 机制层应当优先用官方协议,而不是插件自己管可见性。
+>
+> | 官方设施 | 事实(实测) |
+> | --- | --- |
+> | `ToolSchema.deferLoading?: true` | 注释原文:"Requests deferred loading of the tool definition into model context … **Uses Anthropic's defer_loading terminology**"。在 `dsh-tools` 的 `ToolDefinition` 上同样存在 |
+> | 适配器透传 | `dsh-llm-deepseek` 组包时 `...tool.deferLoading === true ? { defer_loading: true } : {}`,并发送 `mid-conversation-tool-changes-2026-07-01` beta 头 |
+> | 中途增删不破缓存 | `ToolUpdate = 'in-history' \| 'addition-only'`;`deepseek-flash` 路由声明 `toolUpdate: "addition-only"`;**`dsh-agent-loop` 自己会发 `tool-addition` 块** |
+> | 会话校验 | `dsh-session` 校验 addition 块必须指向 header 中已声明的完整定义,且 `deferLoading` 若存在必须为 `true` |
+> | 声明 ≠ 激活 | `dsh-llm` README:"Explicitly deferred baseline tools remain deferred until their first retained addition block;**declaring a deferred tool does not activate it**" |
+> | 无支持时的降级 | 无 `toolUpdate` 的路由:剥离标记全量下发(`dsh-llm` L789);**`dsh-llm-pi-ai` 遇到该标记直接抛 `LlmError("Deferred tool loading is not supported yet")`** |
+> | 可查询 | `LlmResolvedModelInfo.toolUpdate?: ToolUpdate`(`dsh-llm` types L387),经 `ctx.llm.resolveModel(provider, model)` 取得;`pi-ai` 不声明 `toolUpdate` ⇒ **用"是否存在 `toolUpdate`"门控即可安全避开它的硬报错** |
+> | MCP 现状 | `dsh-mcp-client` 的 835 行 bundle 里 **0 处 `deferLoading`** —— 协议在,桥没用 |
+>
+> ⇒ **首选杠杆:`deferLoading`(协议级,provider 负责"不加载")**;插件级的 `restrict`+shadow(下文 §2)降为**不支持该协议的路由的兜底**;热集冷却策略(§2.2/§2.3)保留为策略层,但在协议级生效时,它的收益从"省 token"降级为"省工具表噪声与缓存压力"。详见 **附录 A**。
+
 ---
 
 ## 0. 官方现状:0.2.0-rc.2 没有解决这个问题
@@ -195,3 +214,61 @@ PY
 ```
 
 实测样本(dianping):`tools=3`,`schema=3292 B` ≈ 540–680 token/轮。
+
+---
+
+## 附录 A(v3):协议级延迟加载 —— 首选杠杆
+
+### A.1 官方管线(`dsh-agent-loop` ↔ `dsh-llm` ↔ adapter ↔ session)
+
+1. 工具定义可以带 `deferLoading: true`(`ToolDefinition` / `ToolSchema` 都接受)。
+2. `dsh-system-prompt` 组装时把该字段透传给 `ToolSchema`(`lib/index.js` L328)。
+3. 会话中途活跃工具集变化时,**`dsh-agent-loop` 自己发出 `developer/message` + `tool-addition` / `tool-removal` 块**(L1233),引用 header 里已声明的工具名。
+4. `dsh-session` 校验这些块(必须命中 header 中恰好一个、且定义完整;`deferLoading` 存在时必须为 `true`)。
+5. adapter 把块与 `defer_loading` 一起发给 provider(DeepSeek Messages 需 `mid-conversation-tool-changes-2026-07-01` beta 头)⇒ **增删工具不重写声明列表、不破坏缓存前缀**。
+
+⇒ 结论:**"声明便宜、按需加载、中途增删不破缓存"三件事官方全都有**;MCP 只是从未声明 `deferLoading`。
+
+### A.2 两条落地路径
+
+**路径 1(最干净,改上游一行级):`dsh-mcp-client` 注册时给 schema 加 `deferLoading: true`**,并按路由能力门控(见 A.3)。适合提 upstream PR/issue。
+
+**路径 2(不改上游,本插件可做):在 `dsh-mcp-session` 的 shadow 注册里补标记。**
+插件已经在用 `agent.ctx.tools.register(definition)` 注册 shadow —— 把 definition 换成
+`{ ...definition, deferLoading: true }` 即可让该 agent 看到的这份 schema 走延迟加载:
+
+```ts
+// applyVisibility() 内,注册 shadow 时
+const deferred = this.deferredSupported(agent) ? { ...definition, deferLoading: true } : definition
+shadow.lifts.set(tool, agent.ctx.tools.register(deferred))
+```
+
+**必须门控**(见 A.3),否则不支持的适配器会硬报错。
+
+### A.3 门控(硬约束,不做会炸)
+
+```ts
+async deferredSupported(agent): Promise<boolean> {
+  const route = /* agent 当前 provider/model,可由 request/header 事件缓存 */
+  const info = await this.ctx.llm.resolveModel(route.provider, route.model)
+  return info.toolUpdate !== undefined      // pi-ai 无声明 ⇒ 自动排除
+}
+```
+
+- `toolUpdate === undefined`:不设标记(否则 `dsh-llm` 会剥离、`pi-ai` 会抛错)。
+- 结果按 (provider, model) 缓存,避免每轮 resolve。
+- 判据是**保守**的:`toolUpdate` 存在只说明支持中途变更块;若某路由声明了 `toolUpdate` 却仍拒绝 `defer_loading`,应再加白名单/配置开关兜底。
+
+### A.4 与 §2 策略层的关系
+
+| 路由 | 机制 | 策略 |
+| --- | --- | --- |
+| 支持 `toolUpdate` | **`deferLoading`**(provider 侧不加载定义) | 热集冷却用于收敛工具表噪声;`idleTurns` 可放宽 |
+| 不支持 | `restrict({deny})` + scoped shadow(§2.4) | 热集冷却 + `schemaBudgetBytes` 预算(这是唯一的成本闸门) |
+
+两种情况下 §2.5 的"提示词层讲清释放策略"都必须保留 —— 它是模型不误判能力缺失的前提。
+
+### A.5 验收指标增补
+
+5. 协议级生效时:请求体的 `tools[]` 中 MCP 项均带 `defer_loading: true`,且**未使用时上下文 token 不计入**(用 provider 侧 usage 比对同 prompt 的有/无标记两轮)。
+6. 不支持的路由:绝不出现 `defer_loading` 字段(断言),且 MCP 能力不退化。
