@@ -272,3 +272,71 @@ async deferredSupported(agent): Promise<boolean> {
 
 5. 协议级生效时:请求体的 `tools[]` 中 MCP 项均带 `defer_loading: true`,且**未使用时上下文 token 不计入**(用 provider 侧 usage 比对同 prompt 的有/无标记两轮)。
 6. 不支持的路由:绝不出现 `defer_loading` 字段(断言),且 MCP 能力不退化。
+
+---
+
+## 附录 B(v3.1):协议级延迟加载的**实测结果**
+
+实测环境:DSH 0.2.0-rc.2,路由 `deepseek-official/deepseek-v4-flash`(已在 profile 上声明
+`toolUpdate: addition-only`),MCP server = dianping(3 个工具,DSH 侧定义 3,394 字节)。
+
+### B.1 门控与标记(已生效)
+
+`mcp_status` 自证:
+
+```
+延迟加载(deferLoading):1/1 agent 已打标记;路由能力:deepseek-official/deepseek-v4-flash=支持
+```
+
+`request/header` 事件实测(同一会话内):
+
+```
+seq=3827  工具76  MCP0  defer0      # 插件加载后,服务被隐藏
+seq=3853  工具79  MCP3  defer3      # pin 后:声明 3 个 MCP 工具并打上 deferLoading
+```
+
+⇒ 官方语义"**声明 ≠ 激活**"得到验证:头部声明(带标记)+ 紧随其后的 `tool-addition` 块(激活)。
+
+### B.2 中途增删工具不再重算缓存(可量化)
+
+`dsh-agent-loop` 的判定:`startsSeries … || (preparedCall?.toolUpdate === void 0 && this.toolsChanged(...))`
+—— 声明了 `toolUpdate` 后,工具集变化不再开启新序列。日志吻合:
+
+| 步骤 | 新 token | 缓存命中 | 提示总量 |
+| --- | --- | --- | --- |
+| pin 前一步 | 452 | 371,328 | 371,780 |
+| **pin 生效(带 tool-addition)** | **412** | **371,968** | 372,380 |
+
+⇒ 中途新增 3 个工具只花 **+412 新 token**,37.2 万前缀照常命中缓存。(P1 之前,同一次变化会走
+`startsSeries` 分支重算整份前缀。)
+
+### B.3 `defer_loading` 的 token 效果(受控 A/B)
+
+方法:利用插件配置**热重载**,在同一轮对话内来回切换状态,使*可见工具完全相同*、唯一差别是标记 ——
+`defaultPolicy: eager` 让工具走 mcp-client 的**全局注册(无标记)**,`lazy + mcp_pin` 走插件的
+**shadow(有标记)**。每步只执行一个体量相同的一行命令(内容增量 30–60 token),从而把固定前缀的
+变化从自然增长里分离出来:
+
+| 状态切换 | 净变化 |
+| --- | --- |
+| 标记ON → 标记OFF | **+889** |
+| 标记OFF → 标记ON | **−661** |
+| 标记ON → 标记OFF | **+890** |
+
+**结论**:在对话内容只增不减的前提下,OFF→ON 出现 **−661** —— 只有"固定前缀中的 token 被移除"
+才可能发生。方向明确:**延迟标记确实把这些定义挡在了计数之外**(实测 661–890,与静态估算
+848–1,061 同量级)。
+
+**必须说明的误差来源**:(a) 每次状态切换都会开启新的声明序列,混入少量序列/tool-change 块的
+开销;(b) 反向切换的绝对值不一致(+889 vs −661),说明两个方向的开销不对称,故**只应读作
+"约 0.7–0.9k token / 3 个工具"的量级**,不是精确常数;(c) 单 server × 3 工具的样本很小,
+但收益随 MCP 定义总量线性放大(本机已配置 6 个 server)。
+
+### B.4 结论与取舍
+
+- **保留 `toolUpdate: addition-only`**:官方默认目录对 DeepSeek V4.1 Flash 就是这么声明的;
+  实测收益是"工具集中途变化不再重算缓存"+"未被使用的定义不计入上下文"。
+- **回退命令**(若 provider 端日后拒绝该协议):删掉 profile patch 中 `deepseek-v4-flash` 名下的
+  `toolUpdate: addition-only`,重启;插件门控会自动回到"不打标记"的保守状态。
+- 本机实测出现一次**未解释的完整缓存失效**(37.1 万 token),发生在 addition 后一步且同一秒的
+  请求是正常命中,故**不属于本次改动**;已列为后续排查项,不计入上面的收益。
