@@ -28,6 +28,10 @@ export declare class SessionManager {
     private applying;
     private rescanQueued;
     private failOpen;
+    /** `provider/model` → whether that resolved route accepts deferred definitions. */
+    private readonly deferral;
+    /** Routes whose capability lookup is already in flight. */
+    private readonly deferralPending;
     constructor(ctx: Context, userConfig: McpSessionUserConfig);
     /** The resolved config, re-read (mtime-cached) on every access. */
     get config(): ResolvedConfig;
@@ -68,6 +72,25 @@ export declare class SessionManager {
      * MCP name set moved, and a shadow is re-registered only when its definition
      * object changed (server reconnect).
      */
+    /** The resolved model route of one agent's session, when known. */
+    private routeOf;
+    /**
+     * Whether this agent's resolved route accepts deferred tool definitions.
+     *
+     * `ToolSchema.deferLoading` is provider-facing: the DeepSeek adapter
+     * serializes it to `defer_loading` and sends the mid-conversation
+     * tool-changes beta header, while a route that declares no `ToolUpdate`
+     * either has the marker stripped (`dsh-llm`) or refuses the request outright
+     * (`dsh-llm-pi-ai` throws "Deferred tool loading is not supported yet").
+     * So the marker is only ever inscribed for a route whose resolved metadata
+     * declares `toolUpdate`.
+     *
+     * The lookup is asynchronous and cached per `provider/model`; until it
+     * settles this returns false (conservative: the marker is never sent to a
+     * route that might reject it). A positive answer re-applies visibility so
+     * the shadows are rebuilt carrying the marker.
+     */
+    private deferralSupported;
     private applyVisibility;
     private disposeShadow;
     private disposeShadows;

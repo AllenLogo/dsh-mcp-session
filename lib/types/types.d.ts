@@ -48,4 +48,10 @@ export interface AgentState {
     denyLift: (() => void) | undefined;
     /** Global MCP names the installed deny covers (used for cheap change detection). */
     denyNames: string[];
+    /**
+     * Whether this agent's shadows carry `deferLoading: true` (the resolved
+     * route accepts deferred tool definitions). A flip rebuilds every shadow,
+     * because the marker changes the registered object.
+     */
+    deferring: boolean;
 }
